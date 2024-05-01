@@ -21,7 +21,7 @@ import argparse
 
 import logging
 
-import datetime 
+from datetime import datetime 
 import pytz
 
 
@@ -53,22 +53,30 @@ class sql_interface():
 
 
     
-def hour_min_to_utc_timestamp(hour, minute, seconds = False):
+def hour_min_to_utc_timestamp(hour, minute, seconds = False, timezone_name:str="Europe/Amsterdam"):
     # Get current UTC time
-    current_utc_time = datetime.datetime.now(datetime.timezone.utc)
+    # Create a timezone object for the local timezone
+    local_timezone = pytz.timezone(timezone_name)
+
+    # Get the current time in the local timezone
+    local_time = datetime.now(local_timezone)
 
     # Create a new datetime object with the provided hour and minute
     if seconds == None:
-        target_time = current_utc_time.replace(hour=hour, minute=minute)
+        target_time = local_time.replace(hour=hour, minute=minute)
     elif seconds == False:
-        target_time = current_utc_time.replace(hour=hour, minute=minute,second = 0, microsecond=0)
+        target_time = local_time.replace(hour=hour, minute=minute,second = 0, microsecond=0)
     else:
-        target_time = current_utc_time.replace(hour=hour, minute=minute,second = seconds, microsecond=0)
+        target_time = local_time.replace(hour=hour, minute=minute,second = seconds, microsecond=0)
 
-    # Convert the datetime object to a UTC timestamp
-    utc_timestamp = target_time.timestamp()
+    # Convert the local time to UTC
+    utc_time = target_time.astimezone(pytz.utc)
+
+    # Convert the UTC time to a timestamp
+    utc_timestamp = (utc_time - datetime(1970, 1, 1, tzinfo=pytz.utc)).total_seconds()
 
     return utc_timestamp
+
 
 
 # API Endpoint
