@@ -22,6 +22,7 @@ import argparse
 import logging
 
 from datetime import datetime 
+import time
 import pytz
 
 
@@ -41,6 +42,7 @@ re_bus_is_canceld = re.compile("[A-z :0-9]*Fällt aus")
 
 
 class sql_interface():
+    
     def __init__(self, db_filename:str = "DB"):
         self.db = sqlite3.connect(db_filename)
 
@@ -50,6 +52,15 @@ class sql_interface():
         #check if al the tables of the DB are there
 
         res = cur.execute("IF (EXISTS (SELECT * FROM))")
+    
+    def create_table_destinations():
+        pass
+    
+    def create_table_departure_stop():
+        pass
+
+    def create_table_lines():
+        pass
 
 
     
@@ -195,7 +206,7 @@ def main():
         
                 
         table.add_row([line,vehicle_id, destination, departure, delay, bus_info_array, bus_is_canceled_, planed_dep_time, real_dep_time])
-        json_array.append([line,vehicle_id, destination, departure, delay, bus_info_array, planed_dep_time, real_dep_time])
+        json_array.append({"line":line,"ID":vehicle_id,"destination" :destination, "departure":departure, "delay":delay, "information":bus_info_array, "planed_dep_time":planed_dep_time, "real_dep_time":real_dep_time})
 
 
     #calculate next fetch length (minumum is 5, add extra if train is i the past. add 2  remove one. Maximum is 30, however more may be necessary)
@@ -203,20 +214,35 @@ def main():
     fetch_count_shrinke_rate = 1
     min_fetch_count = 5
     max_fetch_count = 30
-    fetch_lookahead_target_min = 15
+    fetch_lookahead_target_sec = 15*60
 
-    sec_to_last_currently_loaded_departure = 0
+    next_fetch_count = 0
+    current_fetch_count = int(ncols)
+    sec_to_last_currently_loaded_departure = time.mktime(datetime.now().timetuple()) - float(float(json_array[len(json_array)-1]["planed_dep_time"]))
     
+    if sec_to_last_currently_loaded_departure < fetch_lookahead_target_sec:
+        #if we are fetching to many departures
+        if current_fetch_count < max_fetch_count:
+            next_fetch_count = current_fetch_count + fetch_count_grow_rate
+        else:
+            next_fetch_count = max_fetch_count
+    else:
+        if current_fetch_count > min_fetch_count:
+            next_fetch_count = current_fetch_count - fetch_count_shrinke_rate
+        else:
+            next_fetch_count = min_fetch_count
+
     #calculate fetch delay (default 15 seconds unless next bus is more that 30 min away, or next bus within 2 min)
     #next bus comes in 6h -> wait 3, then 1.5, then 45min, then 22.5 min, then 11.25 and so on. if its lower then two min check every 15 seconds (adjustable) (however max delay is one hour to detect potential changes...)
     min_interval_sec = 15
     highress_switch_sec = 120
     max_intervall_sec = 60*60
     
-    sec_to_next_departure = 0
-
+    #sec_to_next_departure =  float(datetime.now("Europe/Amsterdam")) - float(json_array[0]["planed_dep_time"])
+    sec_to_next_departure = float(float(json_array[0]["planed_dep_time"])) - time.mktime(datetime.now().timetuple())
+    
     sec_to_next_interval = 0
-
+    
     if sec_to_next_departure <= highress_switch_sec:
         sec_to_next_interval = min_interval_sec
     else:
@@ -224,8 +250,8 @@ def main():
         if sec_to_next_interval > max_intervall_sec:
             sec_to_next_interval = max_intervall_sec
         
-    print(sec_to_next_interval)
-
+    print(f"next request in {sec_to_next_interval} seconds")
+    print(f"next number of fetched departures is {next_fetch_count}")
     print(table) 
 
     #save the jason as file
