@@ -40,6 +40,8 @@ parser.add_argument("-s", "--station", help="Name of the departure station")
 import re
 re_bus_is_canceld = re.compile("[A-z :0-9]*Fällt aus")
 
+#DEBUG
+DEBUG = True
 
 class sql_interface():
     
@@ -49,18 +51,54 @@ class sql_interface():
         #get a cursor to the DB
         cur = self.db.cursor()
 
+        #if debug is true, always ask if the current database should by dropped
+
+        if DEBUG:
+            while true:
+                usr_in = input(" should the database be dropped( y or n)")
+                if usr_in =="y" or usr_in == "Y":
+                    cur.execute("DROP DATABASE")
+                    logger.info("Database was dropped by user request!")
+                    break
+                elif usr_in == "n" or usr_in == "N":
+                    break
+                else:
+                    print("please decide what to Do!")
+
+
         #check if al the tables of the DB are there
 
         res = cur.execute("IF (EXISTS (SELECT * FROM))")
     
-    def create_table_destinations():
-        pass
+    def create_table_destinations(self, cursor):
+        cursor.execute('''CREATE TABLE IF NOT EXISTS Destinations (
+                            ID INTEGER PRIMARY KEY,
+                            Name TEXT
+                        )''')
     
-    def create_table_departure_stop():
-        pass
 
-    def create_table_lines():
-        pass
+    def create_table_departure_stop(self, cursor):
+        cursor.execute('''CREATE TABLE IF NOT EXISTS Bus (
+                            BusID TEXT,
+                            OriginalDepartureTime TEXT,
+                            DelayInMin INTEGER,
+                            Information TEXT,
+                            Canceled TEXT,
+                            UTCDeparture REAL,
+                            UTCRealDeparture REAL,
+                            DestinationID INTEGER,
+                            FOREIGN KEY (BusID) REFERENCES Buses(ID).
+                            FOREIGN KEY (DestinationID) REFERENCES Destinations(ID)
+                        )''')
+
+
+    def create_table_lines(self, cursor):
+        cursor.execute('''CREATE TABLE IF NOT EXISTS Linien (
+                            Name TEXT PRIMARY KEY,
+                            id INTEGER PRIMARY KEY,
+                            imformation TEXT
+                        )''')
+
 
 
     
@@ -189,21 +227,29 @@ def main():
                         messages_array.append(message['head'])
                         # print('  ' + message['text'])
         """
-        
-        if item["msgL"] != None:
+        #try block because sometime some lines are missing the msgL tag. there is a possibility that the information is located somewhere else (old system mby?)
+        try:
+            if item["msgL"] != None:
+                bus_info_array = []
+                bus_is_canceled_ = False
+                for msg in item["msgL"]:
+                    if msg["type"] == "REM":
+                        # Type A semas to indicate tat the following information is about the firm that owns the bus. Because this information is not relevant it is skipped. 
+                        info = json_data['svcResL'][0]['res']['common']['remL'][msg['remX']]
+                        if info["type"] != "A":
+                            bus_info_array.append(info["txtN"])
+                            if re_bus_is_canceld.match(info["txtN"]):
+                                bus_is_canceled_ = True
+                    else:
+                        print("interesting! type is not REM but {}\n {}", msg["type"],msg)
+        except KeyError:
+            print("no detailed information for this line found!")
             bus_info_array = []
-            bus_is_canceled_ = False
-            for msg in item["msgL"]:
-                if msg["type"] == "REM":
-                    # Type A semas to indicate tat the following information is about the firm that owns the bus. Because this information is not relevant it is skipped. 
-                    info = json_data['svcResL'][0]['res']['common']['remL'][msg['remX']]
-                    if info["type"] != "A":
-                        bus_info_array.append(info["txtN"])
-                        if re_bus_is_canceld.match(info["txtN"]):
-                            bus_is_canceled_ = True
-                else:
-                    print("interesting! type is not REM but {}\n {}", msg["type"],msg)
-        
+            bus_info_array.append("NO INFORMATION FOUND")
+        except Exception as ex:
+            print(ex)
+            print("unknown error Programm exit!")
+            return
                 
         table.add_row([line,vehicle_id, destination, departure, delay, bus_info_array, bus_is_canceled_, planed_dep_time, real_dep_time])
         json_array.append({"line":line,"ID":vehicle_id,"destination" :destination, "departure":departure, "delay":delay, "information":bus_info_array, "planed_dep_time":planed_dep_time, "real_dep_time":real_dep_time})
@@ -236,6 +282,7 @@ def main():
     #next bus comes in 6h -> wait 3, then 1.5, then 45min, then 22.5 min, then 11.25 and so on. if its lower then two min check every 15 seconds (adjustable) (however max delay is one hour to detect potential changes...)
     min_interval_sec = 15
     highress_switch_sec = 120
+
     max_intervall_sec = 60*60
     
     #sec_to_next_departure =  float(datetime.now("Europe/Amsterdam")) - float(json_array[0]["planed_dep_time"])
@@ -253,12 +300,15 @@ def main():
     print(f"next request in {sec_to_next_interval} seconds")
     print(f"next number of fetched departures is {next_fetch_count}")
     print(table) 
+    print(f"there are {len(json_array)} etrys in the list!")
 
     #save the jason as file
     with open("result.json", "wt") as file:
         file.write(str(json.dumps(json_data)))
 
     #print(json.dumps(json_array))
+
+    #save new data to DB
 
 
 if __name__ == "__main__":
