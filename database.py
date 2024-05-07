@@ -34,11 +34,10 @@ class sql_interface():
                     print("please decide what to Do!")
 
 
-        if not DEBUG:
-            self.create_table_Location(cur)
-            self.create_table_directions(cur)
-            self.create_table_lines(cur)
-            self.create_table_TransportationAssets(cur)
+        self.create_table_Location(cur)
+        self.create_table_directions(cur)
+        self.create_table_lines(cur)
+        self.create_table_TransportationAssets(cur)
 
     
     def create_table_Location(self, cursor):
@@ -51,7 +50,7 @@ class sql_interface():
 
     def create_table_TransportationAssets(self, cursor):
         cursor.execute('''CREATE TABLE IF NOT EXISTS TransportationAssets (
-                            PRIMARY KEY ID INTEGER,
+                            ID INTEGER PRIMARY KEY,
 
                             OriginalDepartureTime TEXT,
 
@@ -63,26 +62,30 @@ class sql_interface():
 
                             UTCDeparture TIMESTAMP,
                             UTCRealDeparture TIMESTAMP,
+                            CreatedAt TIMESTAMP,
 
-                            FOREIGN KEY (LineID) REFERENCES lines(ID),
+                            LineID INTEGER,
+                            FOREIGN KEY (LineID) REFERENCES lines(ID)
 
-                            CreatedAt TIMESTAMP
                         )''')
 
 
     def create_table_lines(self, cursor):
         cursor.execute('''CREATE TABLE IF NOT EXISTS lines (
-                            Name TEXT,
                             ID INTEGER PRIMARY KEY,
-                            DestinationID INTEGER,
-                            FOREIGN KEY (DestinationID) REFERENCES Location(ID)
+                            Name TEXT,
+                            destinationID INTEGER,
+                            direction_ID INTEGER,
+                            FOREIGN KEY (destinationID) REFERENCES Location(ID),
+                            FOREIGN KEY (direction_ID) REFERENCES directions(ID)
                         )''')
     def create_table_directions(self,cursor):
-        cursor.execute('''
-                        
-    
-                        
-                        ''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS directions(
+                        ID INTEGER PRIMARY KEY,
+                        information_text TEXT,
+                        direction_text TEXT
+                        )''')
+
     def get_cursor(self):
         return self.db.cursor()
     
