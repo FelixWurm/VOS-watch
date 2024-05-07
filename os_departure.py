@@ -12,11 +12,8 @@ Modified by Felix Wurm in 2024 to expad the functionality of the Script.
 """
 
 import sys
-import json
-import requests
 import prettytable
 
-import sqlite3
 import argparse
 
 import logging
@@ -25,6 +22,10 @@ from datetime import datetime
 import time
 import pytz
 
+import hafas_query
+import database
+
+import json
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(filename='myapp.log', level=logging.INFO)
@@ -39,67 +40,10 @@ parser.add_argument("-s", "--station", help="Name of the departure station")
 
 import re
 re_bus_is_canceld = re.compile("[A-z :0-9]*Fällt aus")
+re_line_owner = re.compile("Linie der [A-z :0-9]*")
 
 #DEBUG
 DEBUG = True
-
-class sql_interface():
-    
-    def __init__(self, db_filename:str = "DB"):
-        self.db = sqlite3.connect(db_filename)
-
-        #get a cursor to the DB
-        cur = self.db.cursor()
-
-        #if debug is true, always ask if the current database should by dropped
-
-        if DEBUG:
-            while true:
-                usr_in = input(" should the database be dropped( y or n)")
-                if usr_in =="y" or usr_in == "Y":
-                    cur.execute("DROP DATABASE")
-                    logger.info("Database was dropped by user request!")
-                    break
-                elif usr_in == "n" or usr_in == "N":
-                    break
-                else:
-                    print("please decide what to Do!")
-
-
-        #check if al the tables of the DB are there
-
-        res = cur.execute("IF (EXISTS (SELECT * FROM))")
-    
-    def create_table_destinations(self, cursor):
-        cursor.execute('''CREATE TABLE IF NOT EXISTS Destinations (
-                            ID INTEGER PRIMARY KEY,
-                            Name TEXT
-                        )''')
-    
-
-    def create_table_departure_stop(self, cursor):
-        cursor.execute('''CREATE TABLE IF NOT EXISTS Bus (
-                            BusID TEXT,
-                            OriginalDepartureTime TEXT,
-                            DelayInMin INTEGER,
-                            Information TEXT,
-                            Canceled TEXT,
-                            UTCDeparture REAL,
-                            UTCRealDeparture REAL,
-                            DestinationID INTEGER,
-                            FOREIGN KEY (BusID) REFERENCES Buses(ID).
-                            FOREIGN KEY (DestinationID) REFERENCES Destinations(ID)
-                        )''')
-
-
-    def create_table_lines(self, cursor):
-        cursor.execute('''CREATE TABLE IF NOT EXISTS Linien (
-                            Name TEXT PRIMARY KEY,
-                            id INTEGER PRIMARY KEY,
-                            imformation TEXT
-                        )''')
-
-
 
     
 def hour_min_to_utc_timestamp(hour, minute, seconds = False, timezone_name:str="Europe/Amsterdam"):
@@ -128,50 +72,7 @@ def hour_min_to_utc_timestamp(hour, minute, seconds = False, timezone_name:str="
 
 
 
-# API Endpoint
-url = 'https://fahrplan.vos.info/bin/mgate.exe'
-
-def main():
-    # Check program arguments
-    if len(sys.argv) == 3:
-        ncols = sys.argv[2]
-    elif len(sys.argv) == 2:
-        ncols = '15'
-    else:
-        print('USAGE: get_departures.py STATION TABLELENGTH(default: 15)')
-
-    # use search string from arguments to query the api for the correct station identifier
-    try:
-        station_query = sys.argv[1]
-    except:
-        print("Program running with default Station Osnabrück-neumarkt!")
-        station_query = "Neumarkt Osnabrück"
-        ncols = 15
-
-
-    payload = json.loads('{"id":"zugcwvduies3y4cc","ver":"1.32","lang":"deu","auth":{"type":"AID","aid":"PnYowCQP7Tp1V"},"client":{"id":"SWO","type":"WEB","name":"webapp","l":"vs_swo"},"formatted":false,"svcReqL":[{"req":{"input":{"field":"S","loc":{"name":"Osnabrück '+ station_query +'?","type":"S","dist":1000},"maxLoc":1}},"meth":"LocMatch","id":"1|6|"}]}')
-    headers = {
-    'Content-Type': 'application/json'
-    }
-    response = requests.request("POST", url, headers=headers, data = json.dumps(payload))
-    station_query_results = json.loads(response.text.encode('utf8'))
-
-    # throw an error if we do not have any stations found
-    if len(station_query_results['svcResL'][0]['res']['match']['locL']) != 1:
-        print('ERROR: No station was found in Osnabrück for your search string!')
-        exit(1)
-
-    station_lid = station_query_results['svcResL'][0]['res']['match']['locL'][0]['lid']
-    station_name = station_query_results['svcResL'][0]['res']['match']['locL'][0]['name']
-
-    # Query departure times
-    payload = json.loads('{"id":"nsk88vbu226fy6c4","ver":"1.32","lang":"deu","auth":{"type":"AID","aid":"PnYowCQP7Tp1V"},"client":{"id":"SWO","type":"WEB","name":"webapp","l":"vs_swo"},"formatted":false,"svcReqL":[{"req":{"stbLoc":{"name":"Osnabrück Kalkhügel","lid":"'+ station_lid +'"},"jnyFltrL":[{"type":"PROD","mode":"INC","value":1023}],"type":"DEP","sort":"PT","maxJny":'+ str(ncols) +'},"meth":"StationBoard","id":"1|9|"}]}')
-    headers = {
-    'Content-Type': 'application/json'
-    }
-    response = requests.request("POST", url, headers=headers, data = json.dumps(payload))
-    json_data = json.loads(response.text.encode('utf8'))
-
+def analyse_data(json_array):
     print('Departure times for ' + station_name)
 
     table = prettytable.PrettyTable()
@@ -196,6 +97,9 @@ def main():
         planned_dep_time_minute = int(item['stbStop']['dTimeS'][2:4])
         planned_dep_time_hour = int(item['stbStop']['dTimeS'][0:2])
         departure = item['stbStop']['dTimeS'][0:2] + ':' + item['stbStop']['dTimeS'][2:4]
+
+        planed_dep_time = hour_min_to_utc_timestamp(planned_dep_time_hour, planned_dep_time_minute, False)
+
         # parse real departure time
         if 'dTimeR' in item['stbStop']:
             real_dep_time_minute = int(item['stbStop']['dTimeR'][2:4])
@@ -203,15 +107,19 @@ def main():
             # calculate delay
             delay_hours = real_dep_time_hour - planned_dep_time_hour
             delay_minutes =  real_dep_time_minute - planned_dep_time_minute
+
+            real_dep_time   =hour_min_to_utc_timestamp(real_dep_time_hour, real_dep_time_minute, None)
+        
         else:
+            real_dep_time   = 0
+            
             delay_hours = 0
             delay_minutes = 0
         # calculate delay in minutes
         delay = delay_hours*60+delay_minutes
 
         #calculate original and new time in unix timestamp format
-        planed_dep_time = hour_min_to_utc_timestamp(planned_dep_time_hour, planned_dep_time_minute, False)
-        real_dep_time   =hour_min_to_utc_timestamp(real_dep_time_hour, real_dep_time_minute, None)
+
 
 
         # check if there are any warnings like the bus has fewer stops or 
@@ -227,6 +135,7 @@ def main():
                         messages_array.append(message['head'])
                         # print('  ' + message['text'])
         """
+
         #try block because sometime some lines are missing the msgL tag. there is a possibility that the information is located somewhere else (old system mby?)
         try:
             if item["msgL"] != None:
@@ -237,6 +146,7 @@ def main():
                         # Type A semas to indicate tat the following information is about the firm that owns the bus. Because this information is not relevant it is skipped. 
                         info = json_data['svcResL'][0]['res']['common']['remL'][msg['remX']]
                         if info["type"] != "A":
+                        #if True:
                             bus_info_array.append(info["txtN"])
                             if re_bus_is_canceld.match(info["txtN"]):
                                 bus_is_canceled_ = True
@@ -248,7 +158,7 @@ def main():
             bus_info_array.append("NO INFORMATION FOUND")
         except Exception as ex:
             print(ex)
-            print("unknown error Programm exit!")
+            print("unknown error query exit!")
             return
                 
         table.add_row([line,vehicle_id, destination, departure, delay, bus_info_array, bus_is_canceled_, planed_dep_time, real_dep_time])
@@ -297,10 +207,11 @@ def main():
         if sec_to_next_interval > max_intervall_sec:
             sec_to_next_interval = max_intervall_sec
         
-    print(f"next request in {sec_to_next_interval} seconds")
-    print(f"next number of fetched departures is {next_fetch_count}")
+    logger.info(f"next request in {sec_to_next_interval} seconds")
+    logger.info(f"next number of fetched departures is {next_fetch_count}")
+    logger.info(f"there are {len(json_array)} etrys in the list!")
+
     print(table) 
-    print(f"there are {len(json_array)} etrys in the list!")
 
     #save the jason as file
     with open("result.json", "wt") as file:
@@ -311,5 +222,38 @@ def main():
     #save new data to DB
 
 
+
+
 if __name__ == "__main__":
-    main()
+
+    # Check program arguments
+    if len(sys.argv) == 3:
+        ncols = sys.argv[2]
+    elif len(sys.argv) == 2:
+        ncols = '15'
+    else:
+        print('USAGE: get_departures.py STATION TABLELENGTH(default: 15)')
+
+    # use search string from arguments to query the api for the correct station identifier
+    try:
+        station_query = sys.argv[1]
+    except:
+        print("Program running with default Station Osnabrück-neumarkt!")
+        station_query = "Neumarkt Osnabrück"
+        ncols = 15
+
+
+    station_query_results = hafas_query.hafas_search_station(f"Osnabrück {station_query}")
+
+    # throw an error if we do not have any stations found
+    if len(station_query_results['svcResL'][0]['res']['match']['locL']) != 1:
+        print('ERROR: No station was found in Osnabrück for your search string!')
+        exit(1)
+
+    station_lid = station_query_results['svcResL'][0]['res']['match']['locL'][0]['lid']
+    station_name = station_query_results['svcResL'][0]['res']['match']['locL'][0]['name']
+
+
+    # Query departure times
+    json_data = hafas_query.hafas_departure_query(station_lid, ncols)
+    analyse_data(json_data)

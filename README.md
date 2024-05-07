@@ -13,3 +13,6 @@ This is a Program to track the dearture times of Buslines in Onsabrück from var
 - möglichkeit die letzten / neusten elemente zu bekommen? elemente der letzten stunde? originale oder echte abfahrtszeit?
 - hinzufügeb Bus fällt aus (dann natürlich nicht mitzählen)
 - Dynamische wahl des zeitfensterns bei sehr hoher verspätung
+
+Some of the information to the hafas protocoll come from this side:
+https://github.com/public-transport/transport-apis/blob/v1/data/de/vos-hafas-mgate.json
