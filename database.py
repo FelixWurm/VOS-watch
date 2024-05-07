@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 
+logger = logging.getLogger(__name__)
 
 class sql_interface():
     
@@ -13,10 +14,18 @@ class sql_interface():
         #if debug is true, always ask if the current database should by dropped
 
         if DEBUG:
-            while true:
+            while True:
                 usr_in = input(" should the database be dropped( y or n)")
                 if usr_in =="y" or usr_in == "Y":
-                    cur.execute("DROP DATABASE")
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                    tables = cur.fetchall()
+
+                    # Drop each table
+                    for table in tables:
+                        table_name = table[0]
+                        cur.execute(f"DROP TABLE IF EXISTS {table_name}")
+                        print(f"Dropped table: {table_name}")
+
                     logger.info("Database was dropped by user request!")
                     break
                 elif usr_in == "n" or usr_in == "N":
@@ -25,15 +34,18 @@ class sql_interface():
                     print("please decide what to Do!")
 
 
-        #check if al the tables of the DB are there
+        if not DEBUG:
+            self.create_table_Location(cur)
+            self.create_table_directions(cur)
+            self.create_table_lines(cur)
+            self.create_table_TransportationAssets(cur)
 
-        res = cur.execute("IF (EXISTS (SELECT * FROM))")
     
     def create_table_Location(self, cursor):
         cursor.execute('''CREATE TABLE IF NOT EXISTS Location (
                             ID INTEGER PRIMARY KEY,
-                            destination_name TEXT,
-                            destination_hafas_LID
+                            name TEXT,
+                            hafas_LID TEXT
                         )''')
     
 
@@ -59,8 +71,18 @@ class sql_interface():
 
 
     def create_table_lines(self, cursor):
-        cursor.execute('''CREATE TABLE IF NOT EXISTS Linien (
+        cursor.execute('''CREATE TABLE IF NOT EXISTS lines (
                             Name TEXT,
                             ID INTEGER PRIMARY KEY,
-                            FOREIGN KEY (destinationID) REFERENCES (Location(ID))
+                            DestinationID INTEGER,
+                            FOREIGN KEY (DestinationID) REFERENCES Location(ID)
                         )''')
+    def create_table_directions(self,cursor):
+        cursor.execute('''
+                        
+    
+                        
+                        ''')
+    def get_cursor(self):
+        return self.db.cursor()
+    

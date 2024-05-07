@@ -28,7 +28,7 @@ import database
 import json
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename='myapp.log', level=logging.INFO)
+logging.basicConfig(filename='app.log', level=logging.INFO)
 
 #Not used right now
 parser  = argparse.ArgumentParser(prog = "Osnabrueck Bus-Delay watchdog", description="Program to track the Buslines in the town in Onsabruek, and store them in a DB to make them available thru a website.")
@@ -253,6 +253,7 @@ if __name__ == "__main__":
     station_lid = station_query_results['svcResL'][0]['res']['match']['locL'][0]['lid']
     station_name = station_query_results['svcResL'][0]['res']['match']['locL'][0]['name']
 
+    print(station_lid)
 
     # Query departure times
     json_data = hafas_query.hafas_departure_query(station_lid, ncols)
