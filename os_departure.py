@@ -27,11 +27,19 @@ import database
 
 import json
 
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename='app.log', level=logging.INFO)
+logging.basicConfig(
+    filename='app.log',
+    level=logging.INFO,
+    format='%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+)
+
+logging.critical("PROGRAM STARTED!")
 
 #Not used right now
-parser  = argparse.ArgumentParser(prog = "Osnabrueck Bus-Delay watchdog", description="Program to track the Buslines in the town in Onsabruek, and store them in a DB to make them available thru a website.")
+parser  = argparse.ArgumentParser(prog = "Osnabrueck Bus-Delay watchdog", description="Program to track the BusLines in the town in Onsabruek, and store them in a DB to make them available thru a website.")
 parser.add_argument("-db", "--db-filename")
 parser.add_argument("-c", "--count", help="Number of the next departures, leave empty for auto")
 parser.add_argument("-a", help="Automatic mode")
@@ -72,7 +80,7 @@ def hour_min_to_utc_timestamp(hour, minute, seconds = False, timezone_name:str="
 
 
 
-def analyse_data(json_array):
+def analyse_data(json_array, db:database.sql_interface):
     print('Departure times for ' + station_name)
 
     table = prettytable.PrettyTable()
@@ -82,7 +90,7 @@ def analyse_data(json_array):
 
     # itereate over all departures
     for i, item in enumerate(json_data['svcResL'][0]['res']['jnyL']):
-        # prodX is used as the foreign key for the departure and references to the array position in producs (bus lines)
+        # prodX is used as the foreign key for the departure and references to the array position in producs (bus Lines)
         line = json_data['svcResL'][0]['res']['common']['prodL'][item['prodL'][0]['prodX']]['name']
         
         #vehicle_id =int(''.join(item["jid"].split("|")))
@@ -93,6 +101,14 @@ def analyse_data(json_array):
 
 
         destination = item['dirTxt']
+        destination_LID = json_data['svcResL'][0]['res']['common']["locL"][item["prodL"][0]["tLocX"]]["lid"]
+        destination_pCLs = json_data['svcResL'][0]['res']['common']["locL"][item["prodL"][0]["tLocX"]]["pCls"]  #Code to represents what typ of transportation can drive from a station
+        try:
+            line_PID = json_data['svcResL'][0]['res']['common']['prodL'][item['prodL'][0]['prodX']]["pid"]
+            line_ID = json_data['svcResL'][0]['res']['common']['prodL'][item['prodL'][0]['prodX']]["prodCtx"]["lineId"]
+        except:
+            pass
+        
         # parse planned departure time
         planned_dep_time_minute = int(item['stbStop']['dTimeS'][2:4])
         planned_dep_time_hour = int(item['stbStop']['dTimeS'][0:2])
@@ -118,25 +134,8 @@ def analyse_data(json_array):
         # calculate delay in minutes
         delay = delay_hours*60+delay_minutes
 
-        #calculate original and new time in unix timestamp format
-
-
-
-        # check if there are any warnings like the bus has fewer stops or 
-        """
-        The following code seams to by outdated and no longer working. Fix / new code below (info is now linked from the bus, not the line )
-        if 'himIdL' in json_data['svcResL'][0]['res']['common']['prodL'][item['prodL'][0]['prodX']].keys():
-            # iterate over all available warnings for the product/line and check if we have a custom text for that
-            for msg_id in json_data['svcResL'][0]['res']['common']['prodL'][item['prodL'][0]['prodX']]['himIdL']:
-                for message in json_data['svcResL'][0]['res']['common']['remL']:
-                    # the warning id is not just an id, it begins with HIM_FREETEXT_ so we have to split it to get the integer value
-                    if int(message['hid']) == int(msg_id.split('_')[2]):
-                        # print short title, long version is in field text
-                        messages_array.append(message['head'])
-                        # print('  ' + message['text'])
-        """
-
-        #try block because sometime some lines are missing the msgL tag. there is a possibility that the information is located somewhere else (old system mby?)
+        # check if there are any warnings like the bus has fewer stops 
+        #try block because sometime some Lines are missing the msgL tag. there is a possibility that the information is located somewhere else (old system mby?)
         try:
             if item["msgL"] != None:
                 bus_info_array = []
@@ -150,8 +149,13 @@ def analyse_data(json_array):
                             bus_info_array.append(info["txtN"])
                             if re_bus_is_canceld.match(info["txtN"]):
                                 bus_is_canceled_ = True
+                    elif msg["type"] == "HIM":
+                        #type of message that contains extra information that may not by necessary. 
+                        info = json_data['svcResL'][0]['res']['common']['himL'][msg['himX']]["head"]
+                        detail_info = json_data['svcResL'][0]['res']['common']['himL'][msg['himX']]["text"]
+
                     else:
-                        print("interesting! type is not REM but {}\n {}", msg["type"],msg)
+                        logger.info("interesting! type is not REM but {}\n {}", msg["type"],msg)
         except KeyError:
             print("no detailed information for this line found!")
             bus_info_array = []
@@ -164,6 +168,8 @@ def analyse_data(json_array):
         table.add_row([line,vehicle_id, destination, departure, delay, bus_info_array, bus_is_canceled_, planed_dep_time, real_dep_time])
         json_array.append({"line":line,"ID":vehicle_id,"destination" :destination, "departure":departure, "delay":delay, "information":bus_info_array, "planed_dep_time":planed_dep_time, "real_dep_time":real_dep_time})
 
+        #Save the data to the Database
+        db.add_TransportationAsset(line,vehicle_id,destination_LID,destination,delay,str(bus_info_array),bus_is_canceled_,planed_dep_time,real_dep_time)
 
     #calculate next fetch length (minumum is 5, add extra if train is i the past. add 2  remove one. Maximum is 30, however more may be necessary)
     fetch_count_grow_rate = 2
@@ -225,6 +231,8 @@ def analyse_data(json_array):
 
 
 if __name__ == "__main__":
+    args = parser.parse_args()
+    db = database.sql_interface(DEBUG=False)
 
     # Check program arguments
     if len(sys.argv) == 3:
@@ -253,8 +261,11 @@ if __name__ == "__main__":
     station_lid = station_query_results['svcResL'][0]['res']['match']['locL'][0]['lid']
     station_name = station_query_results['svcResL'][0]['res']['match']['locL'][0]['name']
 
+    #add station to locations table
+    db.add_location(station_name, station_lid)
+
     print(station_lid)
 
     # Query departure times
     json_data = hafas_query.hafas_departure_query(station_lid, ncols)
-    analyse_data(json_data)
+    analyse_data(json_data, db)

@@ -1,6 +1,6 @@
 # VOS-watch
  
-This is a Program to track the dearture times of Buslines in Onsabrück from varios Stations.  
+This is a Program to track the dearture times of BusLines in Onsabrück from varios Stations.  
 
 ## Ideeen:
 - Tabelle für:
