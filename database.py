@@ -59,7 +59,8 @@ class sql_interface():
     def create_table_TransportationAssets(self, cursor):
         cursor.execute('''CREATE TABLE IF NOT EXISTS TransportationAssets (
                             ID INTEGER PRIMARY KEY,
-
+                            MeasuredFromLocationID INTEGER REFERENCES Destination(ID),
+                       
                             DelayInMin FLOAT,
                             MaxDelayMin FLoat,
 
@@ -69,9 +70,11 @@ class sql_interface():
                             UTCDeparture TIMESTAMP,
                             UTCRealDeparture TIMESTAMP,
                             CreatedAt TIMESTAMP,
-
+                            LastEdit TIMESTAMP,
                             LineID INTEGER,
+                       
                             FOREIGN KEY (LineID) REFERENCES Lines(ID)
+                            
 
                         )''')
 
@@ -104,6 +107,12 @@ class sql_interface():
                 except sqlite3.IntegrityError:
                     logger.info("Hot start detected")
                     break
+    
+    def create_table_query_times(self):
+        cursor = self.db.cursor()
+        cursor.execute(" CREATE TABLE IF NOT EXISTS QueryTimes(Time TIMESTAMP)")
+    
+
 
         cursor.close()
         self.db.commit()
@@ -128,19 +137,17 @@ class sql_interface():
         #check if a line is there
         cur = self.db.cursor()
 
-        cur.execute("SELECT ID FROM Lines WHERE destinationID = ((SELECT ID FROM Locations WHERE hafas_LID=?) AND Name = ?)",(hafas_LID,Name))
+        cur.execute("SELECT ID FROM Lines WHERE destinationID = (SELECT ID FROM Locations WHERE hafas_LID=?) AND Name = ?",(hafas_LID,Name))
         res = cur.fetchall()
-
-        if res == []:
+        if not res:
             self.add_location(destination,hafas_LID)
-
             cur.execute("INSERT INTO Lines(Name, destinationID) VALUES (?, (SELECT ID from locations WHERE hafas_LID = ?))", (Name,hafas_LID))
         
         cur.close()
         self.db.commit()
             
 
-    def add_TransportationAsset(self,lineName:str, ID:int,hafas_dest_LID:str,DestinationName:str,Delay_min,Information:str,canceled:bool,utcDeparture:float,utcRealDeparture:float):
+    def add_TransportationAsset(self,lineName:str, ID:int,hafas_dest_LID:str,DestinationName:str,Delay_min,Information:str,canceled:bool,utcDeparture:float,utcRealDeparture:float,observed_station_name:str, observed_station_hafas_LID):
         cur = self.db.cursor()
         try:
             cur.execute("SELECT ID FROM TransportationAssets WHERE ID=?",(ID, ))
@@ -150,7 +157,8 @@ class sql_interface():
             else:
                 #check if line is there, if not add it to the code
                 self.add_line(lineName, DestinationName,hafas_dest_LID)
-                cur.execute("INSERT INTO TransportationAssets(ID,DelayInMin,Information,Canceled,UTCDeparture,UTCRealDeparture,CreatedAt,LineID) VALUES (?,?,?,?,?,?,(unixepoch()),(SELECT ID from Lines WHERE (Name=? AND destinationID=(SELECT ID FROM Locations WHERE hafas_LID = ?))))",(ID,Delay_min,Information,canceled,utcDeparture,utcRealDeparture,lineName,hafas_dest_LID))
+                self.add_location(observed_station_name, observed_station_hafas_LID)
+                cur.execute("INSERT INTO TransportationAssets(ID,DelayInMin,Information,Canceled,UTCDeparture,UTCRealDeparture,CreatedAt,LineID,MeasuredFromLocationID) VALUES (?,?,?,?,?,?,(unixepoch()),(SELECT ID from Lines WHERE (Name=? AND destinationID=(SELECT ID FROM Locations WHERE hafas_LID = ?))), (SELECT ID FROM Locations WHERE hafas_LID = ?))",(ID,Delay_min,Information,canceled,utcDeparture,utcRealDeparture,lineName,hafas_dest_LID, observed_station_hafas_LID))
 
         except Exception as EX:
             logger.error("Could not add TransportationAsset to Database!")
@@ -159,3 +167,11 @@ class sql_interface():
             
         cur.close()
         self.db.commit()
+        return(existing_asset[0])
+
+    def get_time(self,ID:str):
+        cur = self.db.cursor()
+        cur.execute("SELECT UTCDeparture, UTCRealDeparture FROM TransportationAssets WHERE ID = ?", (ID, ))
+        res = cur.fetchone()
+        cur.close()
+        return(res)

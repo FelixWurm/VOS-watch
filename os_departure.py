@@ -79,14 +79,15 @@ def hour_min_to_utc_timestamp(hour, minute, seconds = False, timezone_name:str="
     return utc_timestamp
 
 
-
-def analyse_data(json_array, db:database.sql_interface):
+def analyse_data(json_data, db:database.sql_interface, observed_location:str, observed_Location_LID:str):
     print('Departure times for ' + station_name)
 
     table = prettytable.PrettyTable()
-    table.field_names = ['Line','ID' ,'Destination', 'Original Departure time', 'Delay (in min)', 'Information', 'Canceled', 'UTC Departure', 'UTC Real departure']
+    table.field_names = ['Line' ,'Destination', 'Original Departure time', 'Delay (in min)', 'Information', 'Canceled']
     table.align = 'l'
-    json_array = []
+
+    first_ID_Edit = None
+    last_ID_Edit = None
 
     # itereate over all departures
     for i, item in enumerate(json_data['svcResL'][0]['res']['jnyL']):
@@ -108,7 +109,7 @@ def analyse_data(json_array, db:database.sql_interface):
             line_ID = json_data['svcResL'][0]['res']['common']['prodL'][item['prodL'][0]['prodX']]["prodCtx"]["lineId"]
         except:
             pass
-        
+
         # parse planned departure time
         planned_dep_time_minute = int(item['stbStop']['dTimeS'][2:4])
         planned_dep_time_hour = int(item['stbStop']['dTimeS'][0:2])
@@ -165,12 +166,25 @@ def analyse_data(json_array, db:database.sql_interface):
             print("unknown error query exit!")
             return
                 
-        table.add_row([line,vehicle_id, destination, departure, delay, bus_info_array, bus_is_canceled_, planed_dep_time, real_dep_time])
-        json_array.append({"line":line,"ID":vehicle_id,"destination" :destination, "departure":departure, "delay":delay, "information":bus_info_array, "planed_dep_time":planed_dep_time, "real_dep_time":real_dep_time})
+        table.add_row([line, destination, departure, delay, bus_info_array, bus_is_canceled_])
 
         #Save the data to the Database
-        db.add_TransportationAsset(line,vehicle_id,destination_LID,destination,delay,str(bus_info_array),bus_is_canceled_,planed_dep_time,real_dep_time)
+        res = db.add_TransportationAsset(line,vehicle_id,destination_LID,destination,delay,str(bus_info_array),bus_is_canceled_,planed_dep_time,real_dep_time,observed_location,observed_Location_LID)
 
+        #save the first an the last ID from the dataset
+        if first_ID_Edit == None:
+            first_ID_Edit = res
+        else:
+            last_ID_Edit = res
+
+
+    print(table)
+    return(first_ID_Edit, last_ID_Edit)
+
+
+
+def calculateNextParameters(db:database.sql_interface, ID_Tuple):
+    print(ID_Tuple)
     #calculate next fetch length (minumum is 5, add extra if train is i the past. add 2  remove one. Maximum is 30, however more may be necessary)
     fetch_count_grow_rate = 2
     fetch_count_shrinke_rate = 1
@@ -180,7 +194,7 @@ def analyse_data(json_array, db:database.sql_interface):
 
     next_fetch_count = 0
     current_fetch_count = int(ncols)
-    sec_to_last_currently_loaded_departure = time.mktime(datetime.now().timetuple()) - float(float(json_array[len(json_array)-1]["planed_dep_time"]))
+    sec_to_last_currently_loaded_departure = time.mktime(datetime.now().timetuple()) - float(db.get_time(ID_Tuple[1])[0])
     
     if sec_to_last_currently_loaded_departure < fetch_lookahead_target_sec:
         #if we are fetching to many departures
@@ -197,12 +211,12 @@ def analyse_data(json_array, db:database.sql_interface):
     #calculate fetch delay (default 15 seconds unless next bus is more that 30 min away, or next bus within 2 min)
     #next bus comes in 6h -> wait 3, then 1.5, then 45min, then 22.5 min, then 11.25 and so on. if its lower then two min check every 15 seconds (adjustable) (however max delay is one hour to detect potential changes...)
     min_interval_sec = 15
-    highress_switch_sec = 120
+    highress_switch_sec = 180
 
     max_intervall_sec = 60*60
     
     #sec_to_next_departure =  float(datetime.now("Europe/Amsterdam")) - float(json_array[0]["planed_dep_time"])
-    sec_to_next_departure = float(float(json_array[0]["planed_dep_time"])) - time.mktime(datetime.now().timetuple())
+    sec_to_next_departure = float(db.get_time(ID_Tuple[0])[0]) - time.mktime(datetime.now().timetuple())
     
     sec_to_next_interval = 0
     
@@ -215,17 +229,8 @@ def analyse_data(json_array, db:database.sql_interface):
         
     logger.info(f"next request in {sec_to_next_interval} seconds")
     logger.info(f"next number of fetched departures is {next_fetch_count}")
-    logger.info(f"there are {len(json_array)} etrys in the list!")
 
-    print(table) 
-
-    #save the jason as file
-    with open("result.json", "wt") as file:
-        file.write(str(json.dumps(json_data)))
-
-    #print(json.dumps(json_array))
-
-    #save new data to DB
+    return(sec_to_next_interval,next_fetch_count)
 
 
 
@@ -267,5 +272,12 @@ if __name__ == "__main__":
     print(station_lid)
 
     # Query departure times
-    json_data = hafas_query.hafas_departure_query(station_lid, ncols)
-    analyse_data(json_data, db)
+
+    #set to default start values
+    next_query_settings = (30,15)
+    while True:
+        json_data = hafas_query.hafas_departure_query(station_lid, next_query_settings[1])
+        ID_tuple = analyse_data(json_data, db,station_name,station_lid)
+        next_query_settings = calculateNextParameters(db,ID_tuple)
+
+        time.sleep(next_query_settings[0])
