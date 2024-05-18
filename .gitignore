@@ -166,3 +166,4 @@ cython_debug/
 result.json
 DB
 app.log
+db_credential.json

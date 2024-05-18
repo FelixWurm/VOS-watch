@@ -26,6 +26,9 @@ import hafas_query
 import database
 
 import json
+import traceback
+
+import os
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +51,6 @@ parser.add_argument("-s", "--station", help="Name of the departure station")
 
 import re
 re_bus_is_canceld = re.compile("[A-z :0-9]*Fällt aus")
-re_line_owner = re.compile("Linie der [A-z :0-9]*")
 
 #DEBUG
 DEBUG = True
@@ -64,7 +66,7 @@ def hour_min_to_utc_timestamp(hour, minute, seconds = False, timezone_name:str="
 
     # Create a new datetime object with the provided hour and minute
     if seconds == None:
-        target_time = local_time.replace(hour=hour, minute=minute)
+        target_time = local_time.replace(hour=hour, minute=minute,microsecond=0)
     elif seconds == False:
         target_time = local_time.replace(hour=hour, minute=minute,second = 0, microsecond=0)
     else:
@@ -83,13 +85,14 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
     print('Departure times for ' + station_name)
 
     table = prettytable.PrettyTable()
-    table.field_names = ['Line' ,'Destination', 'Original Departure time', 'Delay (in min)', 'Information', 'Canceled']
+    table.field_names = ['Line' ,'Destination', 'Original Departure time', 'Delay (in min)', 'Information', 'Canceled',"Delay Information"]
     table.align = 'l'
 
     first_ID_Edit = None
     last_ID_Edit = None
 
-    # itereate over all departures
+
+    # iterate over all departures
     for i, item in enumerate(json_data['svcResL'][0]['res']['jnyL']):
         # prodX is used as the foreign key for the departure and references to the array position in producs (bus Lines)
         line = json_data['svcResL'][0]['res']['common']['prodL'][item['prodL'][0]['prodX']]['name']
@@ -126,12 +129,14 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
             delay_minutes =  real_dep_time_minute - planned_dep_time_minute
 
             real_dep_time   =hour_min_to_utc_timestamp(real_dep_time_hour, real_dep_time_minute, None)
+            delay_information_available = True
         
         else:
             real_dep_time   = 0
             
             delay_hours = 0
             delay_minutes = 0
+            delay_information_available = False
         # calculate delay in minutes
         delay = delay_hours*60+delay_minutes
 
@@ -145,11 +150,14 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
                     if msg["type"] == "REM":
                         # Type A semas to indicate tat the following information is about the firm that owns the bus. Because this information is not relevant it is skipped. 
                         info = json_data['svcResL'][0]['res']['common']['remL'][msg['remX']]
-                        if info["type"] != "A":
-                        #if True:
-                            bus_info_array.append(info["txtN"])
+                        if info["type"] != "A":  
+                        #if True:                          
                             if re_bus_is_canceld.match(info["txtN"]):
                                 bus_is_canceled_ = True
+                            else:
+                                bus_info_array.append(info["txtN"])
+
+                            
                     elif msg["type"] == "HIM":
                         #type of message that contains extra information that may not by necessary. 
                         info = json_data['svcResL'][0]['res']['common']['himL'][msg['himX']]["head"]
@@ -160,13 +168,14 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
         except KeyError:
             print("no detailed information for this line found!")
             bus_info_array = []
-            bus_info_array.append("NO INFORMATION FOUND")
+            bus_is_canceled_ = False
+            #bus_info_array.append("NO INFORMATION FOUND")
         except Exception as ex:
             print(ex)
             print("unknown error query exit!")
             return
                 
-        table.add_row([line, destination, departure, delay, bus_info_array, bus_is_canceled_])
+        table.add_row([line, destination, departure, delay, bus_info_array, bus_is_canceled_,delay_information_available])
 
         #Save the data to the Database
         res = db.add_TransportationAsset(line,vehicle_id,destination_LID,destination,delay,str(bus_info_array),bus_is_canceled_,planed_dep_time,real_dep_time,observed_location,observed_Location_LID)
@@ -183,25 +192,24 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
 
 
 
-def calculateNextParameters(db:database.sql_interface, ID_Tuple):
+def calculateNextParameters(db:database.sql_interface, ID_Tuple,current_fetch_count:int):
     print(ID_Tuple)
     #calculate next fetch length (minumum is 5, add extra if train is i the past. add 2  remove one. Maximum is 30, however more may be necessary)
     fetch_count_grow_rate = 2
     fetch_count_shrinke_rate = 1
     min_fetch_count = 5
-    max_fetch_count = 30
+    max_fetch_count = 50
     fetch_lookahead_target_sec = 15*60
 
     next_fetch_count = 0
-    current_fetch_count = int(ncols)
-    sec_to_last_currently_loaded_departure = time.mktime(datetime.now().timetuple()) - float(db.get_time(ID_Tuple[1])[0])
+    sec_to_last_currently_loaded_departure = float(db.get_time(ID_Tuple[1])[0]) - time.mktime(datetime.now().timetuple())
     
     if sec_to_last_currently_loaded_departure < fetch_lookahead_target_sec:
         #if we are fetching to many departures
         if current_fetch_count < max_fetch_count:
             next_fetch_count = current_fetch_count + fetch_count_grow_rate
         else:
-            next_fetch_count = max_fetch_count
+            sec_to_last_currently_loaded_departure = max_fetch_count
     else:
         if current_fetch_count > min_fetch_count:
             next_fetch_count = current_fetch_count - fetch_count_shrinke_rate
@@ -210,7 +218,7 @@ def calculateNextParameters(db:database.sql_interface, ID_Tuple):
 
     #calculate fetch delay (default 15 seconds unless next bus is more that 30 min away, or next bus within 2 min)
     #next bus comes in 6h -> wait 3, then 1.5, then 45min, then 22.5 min, then 11.25 and so on. if its lower then two min check every 15 seconds (adjustable) (however max delay is one hour to detect potential changes...)
-    min_interval_sec = 15
+    min_interval_sec = 20
     highress_switch_sec = 180
 
     max_intervall_sec = 60*60
@@ -236,48 +244,73 @@ def calculateNextParameters(db:database.sql_interface, ID_Tuple):
 
 
 if __name__ == "__main__":
-    args = parser.parse_args()
-    db = database.sql_interface(DEBUG=False)
+    err_count = 0
+    while err_count < 3:
+        #args = parser.parse_args()
+        db = database.sql_interface(DEBUG=False)
 
-    # Check program arguments
-    if len(sys.argv) == 3:
-        ncols = sys.argv[2]
-    elif len(sys.argv) == 2:
-        ncols = '15'
-    else:
-        print('USAGE: get_departures.py STATION TABLELENGTH(default: 15)')
+        # Check program arguments
+        if len(sys.argv) == 3:
+            ncols = sys.argv[2]
+        elif len(sys.argv) == 2:
+            ncols = '15'
+        else:
+            print('USAGE: get_departures.py STATION TABLELENGTH(default: 15)')
 
-    # use search string from arguments to query the api for the correct station identifier
-    try:
-        station_query = sys.argv[1]
-    except:
-        print("Program running with default Station Osnabrück-neumarkt!")
-        station_query = "Neumarkt Osnabrück"
-        ncols = 15
+        # use search string from arguments to query the api for the correct station identifier
+        try:
+            station_query = sys.argv[1]
+        except:
+            print("Program running with default Station Osnabrück-neumarkt!")
+            station_query = "Neumarkt Osnabrück"
+            ncols = 15
 
 
-    station_query_results = hafas_query.hafas_search_station(f"Osnabrück {station_query}")
+        station_query_results = hafas_query.hafas_search_station(f"Osnabrück {station_query}")
 
-    # throw an error if we do not have any stations found
-    if len(station_query_results['svcResL'][0]['res']['match']['locL']) != 1:
-        print('ERROR: No station was found in Osnabrück for your search string!')
-        exit(1)
+        # throw an error if we do not have any stations found
+        if len(station_query_results['svcResL'][0]['res']['match']['locL']) != 1:
+            print('ERROR: No station was found in Osnabrück for your search string!')
+            exit(1)
 
-    station_lid = station_query_results['svcResL'][0]['res']['match']['locL'][0]['lid']
-    station_name = station_query_results['svcResL'][0]['res']['match']['locL'][0]['name']
+        station_lid = station_query_results['svcResL'][0]['res']['match']['locL'][0]['lid']
+        station_name = station_query_results['svcResL'][0]['res']['match']['locL'][0]['name']
 
-    #add station to locations table
-    db.add_location(station_name, station_lid)
+        #add station to locations table
+        db.add_location(station_name, station_lid)
 
-    print(station_lid)
+        print(station_lid)
 
-    # Query departure times
+        # Query departure times
 
-    #set to default start values
-    next_query_settings = (30,15)
-    while True:
-        json_data = hafas_query.hafas_departure_query(station_lid, next_query_settings[1])
-        ID_tuple = analyse_data(json_data, db,station_name,station_lid)
-        next_query_settings = calculateNextParameters(db,ID_tuple)
+        #set to default start values
+        
+        next_query_settings = (30,15)
+        consecutiveErrorCount = 0
+        while True:
+            os.system('clear')
+            try:
+                json_data = hafas_query.hafas_departure_query(station_lid, next_query_settings[1])
+                file = open("wronginfo.json","wt")
+                file.write(str(json.dumps(json_data)))
+                if json_data:
+                    ID_tuple = analyse_data(json_data, db,station_name,station_lid)
+                    next_query_settings = calculateNextParameters(db,ID_tuple,next_query_settings[1])
+                else:
+                    logger.error("No response from server")
 
-        time.sleep(next_query_settings[0])
+                time.sleep(next_query_settings[0])
+                consecutiveErrorCount = 0
+
+            except KeyboardInterrupt:
+                exit("Program exits due to user input!")
+            
+            except Exception as EX:
+                logger.error(f"{traceback.format_exc()}   :   {EX}")
+                logger.info("Delay for 10 sec")
+                time.sleep(10)
+                consecutiveErrorCount += 1
+                if consecutiveErrorCount > 5 :
+                    logger.error("Failed to restore program shuting down...")
+                    err_count +=1
+                    break
