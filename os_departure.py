@@ -81,6 +81,26 @@ def hour_min_to_utc_timestamp(hour, minute, seconds = False, timezone_name:str="
     return utc_timestamp
 
 
+def hour_min_to_localTimezone_timestamp(hour, minute, seconds = False):
+
+    # Create a timezone object for the local timezone
+    #local_timezone = pytz.timezone(timezone_name:str="Europe/Amsterdam")
+
+    # Get the current time in the local timezone
+    Timestamp = datetime.now()
+
+    # Create a new datetime object with the provided hour and minute
+    if seconds == None:
+        Timestamp = Timestamp.replace(hour=hour, minute=minute,microsecond=0)
+    elif seconds == False:
+        Timestamp = Timestamp.replace(hour=hour, minute=minute,second = 0, microsecond=0)
+    else:
+        Timestamp = Timestamp.replace(hour=hour, minute=minute,second = seconds, microsecond=0)
+
+    return Timestamp
+
+
+
 def analyse_data(json_data, db:database.sql_interface, observed_location:str, observed_Location_LID:str):
     print('Departure times for ' + station_name)
 
@@ -118,7 +138,7 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
         planned_dep_time_hour = int(item['stbStop']['dTimeS'][0:2])
         departure = item['stbStop']['dTimeS'][0:2] + ':' + item['stbStop']['dTimeS'][2:4]
 
-        planed_dep_time = hour_min_to_utc_timestamp(planned_dep_time_hour, planned_dep_time_minute, False)
+        planed_dep_time = hour_min_to_localTimezone_timestamp(planned_dep_time_hour, planned_dep_time_minute, False)
 
         # parse real departure time
         if 'dTimeR' in item['stbStop']:
@@ -128,15 +148,16 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
             delay_hours = real_dep_time_hour - planned_dep_time_hour
             delay_minutes =  real_dep_time_minute - planned_dep_time_minute
 
-            real_dep_time   =hour_min_to_utc_timestamp(real_dep_time_hour, real_dep_time_minute, None)
+            real_dep_time   =hour_min_to_localTimezone_timestamp(real_dep_time_hour, real_dep_time_minute, None)
             delay_information_available = True
         
         else:
-            real_dep_time   = 0
+            real_dep_time   = None
             
             delay_hours = 0
             delay_minutes = 0
             delay_information_available = False
+
         # calculate delay in minutes
         delay = delay_hours*60+delay_minutes
 
@@ -202,8 +223,8 @@ def calculateNextParameters(db:database.sql_interface, ID_Tuple,current_fetch_co
     fetch_lookahead_target_sec = 15*60
 
     next_fetch_count = 0
-    sec_to_last_currently_loaded_departure = float(db.get_time(ID_Tuple[1])[0]) - time.mktime(datetime.now().timetuple())
-    
+    #sec_to_last_currently_loaded_departure = float(db.get_time(ID_Tuple[1])[0]) - time.mktime(datetime.now().timetuple())
+    sec_to_last_currently_loaded_departure = (db.get_time(ID_Tuple[1])[0] - datetime.now()).total_seconds()
     if sec_to_last_currently_loaded_departure < fetch_lookahead_target_sec:
         #if we are fetching to many departures
         if current_fetch_count < max_fetch_count:
@@ -224,8 +245,8 @@ def calculateNextParameters(db:database.sql_interface, ID_Tuple,current_fetch_co
     max_intervall_sec = 60*60
     
     #sec_to_next_departure =  float(datetime.now("Europe/Amsterdam")) - float(json_array[0]["planed_dep_time"])
-    sec_to_next_departure = float(db.get_time(ID_Tuple[0])[0]) - time.mktime(datetime.now().timetuple())
-    
+    #sec_to_next_departure = float(db.get_time(ID_Tuple[0])[0]) - time.mktime(datetime.now().timetuple())
+    sec_to_next_departure = (db.get_time(ID_Tuple[0])[0] - datetime.now()).total_seconds()
     sec_to_next_interval = 0
     
     if sec_to_next_departure <= highress_switch_sec:
@@ -289,6 +310,7 @@ if __name__ == "__main__":
         consecutiveErrorCount = 0
         while True:
             os.system('clear')
+            logger.info("Start_query...")
             try:
                 json_data = hafas_query.hafas_departure_query(station_lid, next_query_settings[1])
                 file = open("wronginfo.json","wt")
