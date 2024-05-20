@@ -119,7 +119,6 @@ class sql_interface():
                             ID BIGINT PRIMARY KEY,
                             MeasuredFromLocationID INTEGER REFERENCES Locations(ID),
                        
-                            DelayInMin FLOAT,
                             MaxDelayMin FLoat,
 
                             Information TEXT,
@@ -251,3 +250,47 @@ class sql_interface():
         res = cur.fetchone()
         cur.close()
         return(res)
+    
+    def get_average(self, ToLookBack:int=15, ToLookFuture = 5):
+        with self.db.cursor() as cur:
+            cur.execute("SELECT AVG(DelayInMin),COUNT(DelayInMin) FROM Transportationassets WHERE RealDeparture IS NOT NULL AND RealDeparture > NOW() - INTERVAL '%s minutes' AND Departure < NOW() + INTERVAL '%s minutes' AND Canceled=False", (ToLookBack,ToLookFuture ))
+            result = cur.fetchone()
+
+            if result != [] and result:
+                try:
+                    print(result)
+                    return(result[0], result[1])
+                except:
+                    return None
+                
+            
+        return None
+    
+    def get_departure_table(self, ToLookBack:int=15, ToLookFuture = 5):
+        pass
+        with self.db.cursor() as cur:
+            cur.execute('''
+
+SELECT ta.DelayInMin, ta.Departure, l.name
+FROM 
+    (SELECT DelayInMin, LineID, Departure
+     FROM transportationassets 
+     WHERE Departure > NOW() - INTERVAL '15 minutes' 
+     AND Departure < NOW() + INTERVAL '5 minutes') ta
+INNER JOIN lines l ON ta.LineID = l.id;SELECT AVG(DelayInMin),COUNT(DelayInMin) FROM Transportationassets WHERE RealDeparture IS NOT NULL AND RealDeparture > NOW() - INTERVAL '%s minutes' AND Departure < NOW() + INTERVAL '%s minutes' AND Canceled=False
+
+            ''', (ToLookBack, ToLookFuture))
+            result = cur.fetchall()
+            return result;
+            
+
+"""
+SELECT ta.DelayInMin, ta.Departure, l.name
+FROM 
+    (SELECT DelayInMin, LineID, Departure
+     FROM transportationassets 
+     WHERE Departure > NOW() - INTERVAL '15 minutes' 
+     AND Departure < NOW() + INTERVAL '5 minutes') ta
+INNER JOIN lines l ON ta.LineID = l.id;SELECT AVG(DelayInMin),COUNT(DelayInMin) FROM Transportationassets WHERE RealDeparture IS NOT NULL AND RealDeparture > NOW() - INTERVAL '15 minutes' AND Departure < NOW() + INTERVAL '5 minutes' AND Canceled=False
+
+"""

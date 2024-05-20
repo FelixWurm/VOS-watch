@@ -313,8 +313,7 @@ if __name__ == "__main__":
             logger.info("Start_query...")
             try:
                 json_data = hafas_query.hafas_departure_query(station_lid, next_query_settings[1])
-                file = open("wronginfo.json","wt")
-                file.write(str(json.dumps(json_data)))
+                
                 if json_data:
                     ID_tuple = analyse_data(json_data, db,station_name,station_lid)
                     next_query_settings = calculateNextParameters(db,ID_tuple,next_query_settings[1])
