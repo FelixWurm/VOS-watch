@@ -19,14 +19,15 @@ https://github.com/public-transport/transport-apis/blob/v1/data/de/vos-hafas-mga
 
 ### API
 
-- API bauen die in einem bestimmten zeitraum mit einer vorgegebenen auflösung eine zeitreihe zurückgibt.
+- API erweitern um Informationen über die anteilige Verspätung.
 - API bauen die eine art abfahrttafel darstellt.
+- API bauen die in einem bestimmten zeitraum mit einer vorgegebenen auflösung eine zeitreihe zurückgibt.
 - Sichern + vorbereiten für Serverumgebung
 - Layout / Domain festlegen und beschaffen.
 
 ### Website
 
-- Gauge Fixen
+- Gauge umbauen in grüner Bereich -> Buse die 0-3 min verspätung haben, gelb 3-7 min und rot alles darüber. Erklärung hinzufügen?
 - Abfahrttabelle hinzufügen
 - Design verbessern (verwenden von T)
 - lineChart hinzufügen inklusive einstallmöglichkeiten (letzter tag, Woche, Monat)
