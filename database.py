@@ -1,10 +1,11 @@
 import logging
 import psycopg2
-
 import json
 import os
 
 import datetime
+import traceback
+
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +119,7 @@ class sql_interface():
         cursor.execute('''CREATE TABLE IF NOT EXISTS TransportationAssets (
                             ID BIGINT PRIMARY KEY,
                             MeasuredFromLocationID INTEGER REFERENCES Locations(ID),
-                       
-                            MaxDelayMin FLoat,
-
+                                              
                             Information TEXT,
                             Canceled BOOL, 
                             noDelayInoAvailable BOOL,
@@ -129,6 +128,14 @@ class sql_interface():
                             RealDeparture TIMESTAMP(0),
                             CreatedAt TIMESTAMP DEFAULT NOW(),
                             LastEdit TIMESTAMP DEFAULT NOW(),
+
+                            Delay TIME GENERATED ALWAYS AS (RealDeparture - Departure) STORED,                       
+                            Max_Delay TIME(0) GENERATED ALWAYS AS (
+                                CASE 
+                                    WHEN (RealDeparture - Departure) > INTERVAL '0' THEN (RealDeparture - Departure)
+                                    ELSE NULL
+                                END
+                            ) STORED,
                        
                             LineID INTEGER,
                        
@@ -167,9 +174,6 @@ class sql_interface():
         cursor.close()
         self.db.commit()
     
-    def create_table_query_times(self):
-        cursor = self.db.cursor()
-        cursor.execute(" CREATE TABLE IF NOT EXISTS QueryTimes(Time TIMESTAMP)")
     
 
     def create_table_Information(self):
@@ -199,7 +203,10 @@ class sql_interface():
     def add_location(self,StationName:str, StationLID:str=None):
         cur = self.db.cursor()
         try:
-            cur.execute("INSERT INTO Locations (Name, hafas_LID) VALUES (%s,%s)",(StationName,StationLID))
+            cur.execute("SELECT * FROM Locations WHERE hafas_LID = %s",(StationLID, ))
+            res = cur.fetchall()
+            if res and res !=[]:
+                cur.execute("INSERT INTO Locations (Name, hafas_LID) VALUES (%s,%s)",(StationName,StationLID))
         except psycopg2.errors.UniqueViolation as ER:
             logger.info(f"Station <{StationName}> with StationLTD <{StationLID}> already Exists! {ER}")
         
@@ -222,21 +229,22 @@ class sql_interface():
         self.db.commit()
             
 
-    def add_TransportationAsset(self,lineName:str, ID:int,hafas_dest_LID:str,DestinationName:str,Delay_min,Information:str,canceled:bool,Departure:datetime.datetime,RealDeparture:datetime.datetime,observed_station_name:str, observed_station_hafas_LID):
+    def add_TransportationAsset(self,lineName:str, ID:int,hafas_dest_LID:str,DestinationName:str,Information:str,canceled:bool,Departure:datetime.datetime,RealDeparture:datetime.datetime,observed_station_name:str, observed_station_hafas_LID):
         cur = self.db.cursor()
         try:
             cur.execute("SELECT ID FROM TransportationAssets WHERE ID=%s",(ID, ))
             existing_asset = cur.fetchone()
             if existing_asset:
-                cur.execute("UPDATE TransportationAssets SET DelayInMin=%s,Canceled=%s,RealDeparture=%s, LastEdit=NOW() WHERE ID=%s",(Delay_min, canceled,RealDeparture,existing_asset[0]))
+                cur.execute("UPDATE TransportationAssets SET Canceled=%s,RealDeparture=%s, LastEdit=NOW() WHERE ID=%s",(canceled,RealDeparture,existing_asset[0]))
             else:
                 #check if line is there, if not add it to the code
                 self.add_line(lineName, DestinationName,hafas_dest_LID)
                 self.add_location(observed_station_name, observed_station_hafas_LID)
-                cur.execute("INSERT INTO TransportationAssets(ID,DelayInMin,Information,Canceled,Departure,RealDeparture,LineID,MeasuredFromLocationID) VALUES (%s,%s,%s,%s,%s,%s,(SELECT ID from Lines WHERE (Name=%s AND destinationID=(SELECT ID FROM Locations WHERE hafas_LID = %s))), (SELECT ID FROM Locations WHERE hafas_LID = %s))",(ID,Delay_min,Information,canceled,Departure,RealDeparture,lineName,hafas_dest_LID, observed_station_hafas_LID))
+                cur.execute("INSERT INTO TransportationAssets(ID,Information,Canceled,Departure,RealDeparture,LineID,MeasuredFromLocationID) VALUES (%s,%s,%s,%s,%s,(SELECT ID from Lines WHERE (Name=%s AND destinationID=(SELECT ID FROM Locations WHERE hafas_LID = %s))), (SELECT ID FROM Locations WHERE hafas_LID = %s))",(ID,Information,canceled,Departure,RealDeparture,lineName,hafas_dest_LID, observed_station_hafas_LID))
 
         except Exception as EX:
             logger.error("Could not add TransportationAsset to Database!")
+            logger.error(f"{traceback.format_exc()}   :   {EX}")
             print(EX)
             print(ID)
             
@@ -244,24 +252,29 @@ class sql_interface():
         self.db.commit()
         return(ID)
 
-    def get_time(self,ID:str) -> datetime.datetime:
+    def get_time(self,ID:str):
         cur = self.db.cursor()
         cur.execute("SELECT Departure, RealDeparture FROM TransportationAssets WHERE ID = %s", (ID, ))
         res = cur.fetchone()
         cur.close()
         return(res)
     
-    def get_average(self, ToLookBack:int=15, ToLookFuture = 5):
+    def get_average(self, ToLookBack:int=15, ToLookFuture = 5) -> tuple[datetime.timedelta,int,int,int,int]:
         with self.db.cursor() as cur:
-            cur.execute("SELECT AVG(DelayInMin),COUNT(DelayInMin) FROM Transportationassets WHERE RealDeparture IS NOT NULL AND RealDeparture > NOW() - INTERVAL '%s minutes' AND Departure < NOW() + INTERVAL '%s minutes' AND Canceled=False", (ToLookBack,ToLookFuture ))
-            result = cur.fetchone()
-
+            cur.execute("SELECT AVG(Delay),COUNT(*), COUNT(*) FILTER(WHERE Delay <= INTERVAL '3 minutes'), COUNT(*) FILTER(WHERE Delay > INTERVAL '3 minutes' AND Delay <= INTERVAL '8 minutes'), COUNT(*) FILTER(WHERE Delay > INTERVAL '8 minutes') FROM Transportationassets WHERE Delay IS NOT NULL AND RealDeparture > NOW() - INTERVAL '%s minutes' AND Departure < NOW() + INTERVAL '%s minutes'", (ToLookBack,ToLookFuture ))
+            result = cur.fetchall()
+            print(result)
+            result = result[0]
             if result != [] and result:
                 try:
-                    print(result)
-                    return(result[0], result[1])
+                    return(result[0], result[1],result[2],result[3],result[4])
+                    
                 except:
                     return None
+                
+                finally:
+                    cur.close()
+                    self.db.commit()
                 
             
         return None
@@ -271,26 +284,33 @@ class sql_interface():
         with self.db.cursor() as cur:
             cur.execute('''
 
-SELECT ta.DelayInMin, ta.Departure, l.name
+SELECT ta.Delay, ta.Departure, l.name
 FROM 
-    (SELECT DelayInMin, LineID, Departure
+    (SELECT Delay, LineID, Departure
      FROM transportationassets 
      WHERE Departure > NOW() - INTERVAL '15 minutes' 
      AND Departure < NOW() + INTERVAL '5 minutes') ta
-INNER JOIN lines l ON ta.LineID = l.id;SELECT AVG(DelayInMin),COUNT(DelayInMin) FROM Transportationassets WHERE RealDeparture IS NOT NULL AND RealDeparture > NOW() - INTERVAL '%s minutes' AND Departure < NOW() + INTERVAL '%s minutes' AND Canceled=False
-
+INNER JOIN lines l ON ta.LineID = l.id;
             ''', (ToLookBack, ToLookFuture))
             result = cur.fetchall()
-            return result;
+            self.db.commit()
+            return result;  
+
+
             
 
 """
-SELECT ta.DelayInMin, ta.Departure, l.name
+SELECT ta.Delay, ta.Departure, l.name
 FROM 
-    (SELECT DelayInMin, LineID, Departure
+    (SELECT Delay, LineID, Departure
      FROM transportationassets 
      WHERE Departure > NOW() - INTERVAL '15 minutes' 
      AND Departure < NOW() + INTERVAL '5 minutes') ta
-INNER JOIN lines l ON ta.LineID = l.id;SELECT AVG(DelayInMin),COUNT(DelayInMin) FROM Transportationassets WHERE RealDeparture IS NOT NULL AND RealDeparture > NOW() - INTERVAL '15 minutes' AND Departure < NOW() + INTERVAL '5 minutes' AND Canceled=False
+INNER JOIN lines l ON ta.LineID = l.id;
+
+
+ALTER TABLE transportationassets
+ADD COLUMN DelayMax TIME(0) GENERATED ALWAYS AS ( RealDeparture - Departure) STORED;
+
 
 """

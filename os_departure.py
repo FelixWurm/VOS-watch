@@ -199,7 +199,7 @@ def analyse_data(json_data, db:database.sql_interface, observed_location:str, ob
         table.add_row([line, destination, departure, delay, bus_info_array, bus_is_canceled_,delay_information_available])
 
         #Save the data to the Database
-        res = db.add_TransportationAsset(line,vehicle_id,destination_LID,destination,delay,str(bus_info_array),bus_is_canceled_,planed_dep_time,real_dep_time,observed_location,observed_Location_LID)
+        res = db.add_TransportationAsset(line,vehicle_id,destination_LID,destination,str(bus_info_array),bus_is_canceled_,planed_dep_time,real_dep_time,observed_location,observed_Location_LID)
 
         #save the first an the last ID from the dataset
         if first_ID_Edit == None:

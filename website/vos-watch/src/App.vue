@@ -8,7 +8,7 @@ import gauge from './components/gauge.vue'
   <div>
     <h1>Aktuelle durchschnittliche Verspätung am Neumarkt</h1>
 
-    <gauge :percent="50"/>
+    <gauge :max_value="10"/>
   </div>
 
   <main>
