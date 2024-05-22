@@ -9,6 +9,7 @@ This is a Program to track the Delay of BusLines in Onsabrück from varios Stati
 
 ### HAFAS Query System
 
+- Spalte für Maximale Verspätung einfügen
 - Tabelle füt zusatzinformationen hinzufügen (auch type A Nachrichten)
 - Programmargumente hinzufügen 
 - Asset Type in Tabelle speichern oder sogar filtern! (Also bus, Bahn, ....)
@@ -19,9 +20,9 @@ https://github.com/public-transport/transport-apis/blob/v1/data/de/vos-hafas-mga
 
 ### API
 
-- API erweitern um Informationen über die anteilige Verspätung.
+- API erweitern um Informationen über die anteiligen ausfallenden Busse?
 - API bauen die eine art abfahrttafel darstellt.
-- API bauen die in einem bestimmten zeitraum mit einer vorgegebenen auflösung eine zeitreihe zurückgibt.
+- API bauen die in einem bestimmten zeitraum mit einer vorgegebenen Auflösung eine zeitreihe zurückgibt.
 - Sichern + vorbereiten für Serverumgebung
 - Layout / Domain festlegen und beschaffen.
 
